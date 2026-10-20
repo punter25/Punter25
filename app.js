@@ -198,17 +198,17 @@
         <div><label>Class</label><input data-r="cls" value="${esc(race.cls)}"></div>
       </div>`;
     if (race.runners.length) {
-      h += `<div class="scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th></th><th>No</th><th>Horse</th><th class="n hide-sm">Dr</th><th class="n hide-sm">Wt</th><th class="n">Odds</th><th class="n">Rtg</th><th class="n">Win%</th><th class="n">xPts</th></tr></thead><tbody>`;
+      h += `<div class="scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th></th><th>No</th><th>Horse</th><th class="n hide-sm">Dr</th><th class="n hide-sm">Wt</th><th class="n">Odds</th><th class="n hide-sm">Rtg</th><th class="n">Win%</th><th class="n">xPts</th></tr></thead><tbody>`;
       race.runners.slice().sort((a, b) => (+a.no || 99) - (+b.no || 99)).forEach(r => {
         const x = A.get(r.id);
         const tags = x ? (r.id === A.best ? '<span class="tag ai">TOP</span>' : '') + (r.id === A.bank ? '<span class="tag bank">BANKER</span>' : '') + (r.id === A.val ? '<span class="tag val">VALUE</span>' : '') : '';
         h += `<tr class="${r.id === race.selId ? 'sel' : ''} ${r.scr ? 'scr' : ''}">
           <td><input class="radio" type="radio" name="sel-${race.id}" data-action="select" data-id="${r.id}" ${r.id === race.selId ? 'checked' : ''} ${r.scr ? 'disabled' : ''} aria-label="Select ${esc(r.name)}"></td>
           <td class="n">${esc(r.no)}</td>
-          <td><button class="name" style="all:unset;cursor:pointer;font-weight:600" data-action="edit-runner" data-id="${r.id}">${esc(r.name || 'Unnamed')}</button>${tags}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / ') || 'Tap name to rate')}</span></td>
+          <td><button class="name" style="all:unset;cursor:pointer;font-weight:600" data-action="edit-runner" data-id="${r.id}">${esc(r.name || 'Unnamed')}</button>${r.stars ? `<span class="tag ai" title="Computaform stars">${'X'.repeat(r.stars)}</span>` : ''}${tags}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / ') || 'Tap name to rate')}</span>${r.form ? `<span class="sub note">${esc(r.form.replace(/^X{1,3} · /, ''))}</span>` : ''}</td>
           <td class="n hide-sm">${esc(r.draw)}</td><td class="n hide-sm">${esc(r.weight)}</td>
           <td class="n">${esc(r.odds || '–')}</td>
-          <td class="n">${x ? fmt(x.rating, 0) : '–'}</td>
+          <td class="n hide-sm">${x ? fmt(x.rating, 0) : '–'}</td>
           <td class="n">${x ? fmt(x.pwin * 100, 0) : '–'}</td>
           <td class="n"><b>${x ? fmt(x.ep) : '–'}</b></td></tr>`;
         if (ui.edit === r.id) h += `<tr><td colspan="9" style="padding:0">${runnerEditor(r, R)}</td></tr>`;
@@ -270,15 +270,19 @@
       <div class="panel"><h2>Race-card text</h2>
       <textarea id="pdfText" placeholder="Extracted or pasted Computaform text appears here. You can edit it before importing.">${esc(ui.pdfText)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn quiet" data-action="pdf-split">Find races</button></div>`;
+    if (ui.pdfMeta) {
+      const M = ui.pdfMeta;
+      h += `<div class="editor" style="margin-top:14px"><b>Computaform layout recognised</b> — ${esc((M.meeting.sponsor ? M.meeting.sponsor + ' ' : '') + (M.meeting.track || ''))} ${esc(M.meeting.date || '')}<br><span class="hint" style="margin:0">${M.races.length} races · ${M.runners} runners · jockeys matched ${M.jockeys}/${M.runners} · trainers matched ${M.trainers}/${M.runners}. Stars, comments, Computaform odds (F/B) and top-4 Computaform &amp; Speed ratings are included.</span></div>`;
+    }
     if (ui.pdfRaces.length) {
       h += `<h3 style="margin-top:14px">Races found</h3><div class="chips">${ui.pdfRaces.map((r, i) => `<button class="chip" data-action="pdf-pick" data-i="${i}" aria-pressed="${ui.pdfPick === i}">Race ${r.no} · ${r.runners.length} runners</button>`).join('')}</div>
         <div class="row"><button class="btn" data-action="pdf-import-all">Import all ${ui.pdfRaces.length} races</button></div>`;
     }
     if (ui.pdfPick != null && ui.pdfRaces[ui.pdfPick]) {
       const pr = ui.pdfRaces[ui.pdfPick];
-      h += `<h3 style="margin-top:16px">Race ${pr.no} preview</h3><p class="hint">${esc(pr.head || '')}</p>
-        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">Odds</th></tr></thead><tbody>
-        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}<span class="sub">${esc(r.jockey || '')}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td></tr>`).join('') || '<tr><td colspan="5">No runner lines detected in this race.</td></tr>'}
+      h += `<h3 style="margin-top:16px">Race ${pr.no} preview</h3><p class="hint">${esc([pr.time, pr.distance ? pr.distance + 'm' : '', pr.surface, pr.cls, pr.prize].filter(Boolean).join(' · ') || pr.head || '')}</p>
+        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">F/B</th><th class="n hide-sm">CF</th><th class="n hide-sm">SR</th></tr></thead><tbody>
+        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}${r.stars ? `<span class="tag ai">${'X'.repeat(r.stars)}</span>` : ''}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / '))}${r.comment ? ' · ' + esc(r.comment) : ''}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td><td class="n hide-sm">${r.cf ? r.cf.v : '–'}</td><td class="n hide-sm">${r.sr ? r.sr.v : '–'}</td></tr>`).join('') || '<tr><td colspan="7">No runner lines detected in this race.</td></tr>'}
         </tbody></table></div>
         <div class="row" style="margin-top:10px"><button class="btn" data-action="pdf-import-one">Import race ${pr.no}</button></div>`;
     }
@@ -365,12 +369,13 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     const buf = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buf }).promise;
-    const pages = [];
+    const pages = [], texts = [];
     for (let i = 1; i <= doc.numPages; i++) {
-      const pg = await doc.getPage(i); const tc = await pg.getTextContent();
-      pages.push(linesFromItems(tc.items).join('\n'));
+      const pg = await doc.getPage(i); const tc = await pg.getTextContent(); const vp = pg.getViewport({ scale: 1 });
+      texts.push(linesFromItems(tc.items).join('\n'));
+      pages.push({ w: vp.width, h: vp.height, items: tc.items.filter(t => t.str && t.str.trim()).map(t => ({ x: t.transform[4], y: t.transform[5], w: t.width, s: Math.abs(t.transform[0]) || Math.abs(t.transform[3]), str: t.str })) });
     }
-    return pages.join('\n\n');
+    return { text: texts.join('\n\n'), pages };
   }
 
   const STOP = /^(RACE|PRIZE|STAKES?|HANDICAP|MAIDEN|MERIT|RATED|POOL|TOTE|JACKPOT|PICK|PLACE|TRIFECTA|QUARTET|EXACTA|SWINGER|BETTING|TIPS?|SELECTIONS?|DISTANCE|WEIGHT|DRAW|JOCKEY|TRAINER|PAGE|COMPUTAFORM|FORM|GOING|CLASS|OWNER|BREEDER|AGE|SEX|COLOURS?)$/;
@@ -379,7 +384,13 @@
     if (!s) return null;
     if (s.includes(',')) { // CSV quick format
       const c = s.split(',').map(x => x.trim());
-      if (/^\d{1,2}$/.test(c[0]) && c[1] && /[A-Za-z]/.test(c[1])) return { no: +c[0], name: c[1], draw: c[2] || '', weight: c[3] || '', odds: c[4] || '', jockey: c[5] || '', trainer: c[6] || '' };
+      if (/^\d{1,2}$/.test(c[0]) && c[1] && /[A-Za-z]/.test(c[1])) {
+        const tail = (c.slice(6).join(',') || '').split(/\s{2,}/).map(x => x.trim()).filter(Boolean);
+        const o = { no: +c[0], name: c[1], draw: c[2] || '', weight: c[3] || '', odds: c[4] || '', jockey: c[5] || '', trainer: tail[0] || '' };
+        let i = 1; if (tail[i] && /^X{1,3}$/.test(tail[i])) { o.stars = tail[i].length; i++; }
+        if (tail[i]) o.comment = tail.slice(i).join(' ');
+        return o;
+      }
     }
     const m = s.match(/^(\d{1,2})[.)]?\s+(.*)$/);
     if (!m) return null;
@@ -441,10 +452,27 @@
     if (!race) { race = newRace(m, pr.no); }
     if (pr.distance && !race.distance) race.distance = pr.distance;
     if (pr.time && !race.time) race.time = pr.time;
+    if (pr.cls && !race.cls) race.cls = pr.cls + (pr.surface && pr.surface !== 'TURF' ? ' · ' + pr.surface : '');
+    if (ui.pdfMeta && ui.pdfMeta.meeting.track && (!m.track || m.track === ui.pdfMeta.meeting.track)) {
+      m.track = ui.pdfMeta.meeting.track; if (ui.pdfMeta.meeting.date) m.date = ui.pdfMeta.meeting.date;
+    }
+    const rankScore = x => x ? [9, 8, 7, 6][x.rank - 1] || 5 : 5;
     for (const p of pr.runners) {
+      const info = { no: p.no, name: p.name, draw: p.draw, weight: p.weight, odds: p.odds, jockey: p.jockey || '', trainer: p.trainer || '' };
+      if (p.stars != null) info.stars = p.stars;
+      const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.comment || '', p.cf ? `CF ${p.cf.v} (#${p.cf.rank})` : '', p.sr ? `SR ${p.sr.v} (#${p.sr.rank})` : ''].filter(Boolean).join(' · ');
+      if (notes) info.form = notes;
+      const clean = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== '' && v != null));
       const ex = race.runners.find(r => +r.no === +p.no);
-      if (ex) Object.assign(ex, Object.fromEntries(Object.entries(p).filter(([, v]) => v !== '')));
-      else race.runners.push(newRunner(p));
+      if (ex) Object.assign(ex, clean);
+      else {
+        const nr = newRunner(clean); const keys = REGIONS[m.region].factors.map(f => f[0]);
+        // Seed ratings from Computaform: stars → Form, Computaform rating rank → Class, Speed rating rank → Last 600m
+        if (p.stars != null && keys.includes('form')) nr.f.form = [5, 6, 7, 8][p.stars] || 5;
+        if (p.cf && keys.includes('class')) nr.f.class = rankScore(p.cf);
+        if (p.sr) { if (keys.includes('l600')) nr.f.l600 = rankScore(p.sr); else if (keys.includes('pace')) nr.f.pace = rankScore(p.sr); }
+        race.runners.push(nr);
+      }
     }
     return race;
   }
@@ -493,11 +521,19 @@
       case 'pdf-extract': {
         const f = $('#pdfFile').files[0]; if (!f) return toast('Choose a PDF first');
         chip.disabled = true; chip.textContent = 'Reading…';
-        try { ui.pdfText = await extractPdf(f); ui.pdfRaces = splitRaces(ui.pdfText, S.region); ui.pdfPick = ui.pdfRaces.length ? 0 : null;
-          toast(ui.pdfText.trim() ? `Text extracted — ${ui.pdfRaces.length} race${ui.pdfRaces.length === 1 ? '' : 's'} found` : 'No text found — this PDF may be scanned');
+        try { const ex = await extractPdf(f);
+          const cf = window.Computaform ? Computaform.parseComputaform(ex.pages) : null;
+          if (cf && cf.runners) {
+            ui.pdfMeta = cf; ui.pdfRaces = cf.races; ui.pdfText = Computaform.toText(cf);
+            toast(`Computaform card read — ${cf.races.length} races, ${cf.runners} runners`);
+          } else {
+            ui.pdfMeta = null; ui.pdfText = ex.text; ui.pdfRaces = splitRaces(ui.pdfText, S.region);
+            toast(ui.pdfText.trim() ? `Text extracted — ${ui.pdfRaces.length} race${ui.pdfRaces.length === 1 ? '' : 's'} found` : 'No text found — this PDF may be scanned');
+          }
+          ui.pdfPick = ui.pdfRaces.length ? 0 : null;
         } catch (err) { toast('Could not read PDF: ' + err.message); }
         break; }
-      case 'pdf-split': ui.pdfText = $('#pdfText').value; ui.pdfRaces = splitRaces(ui.pdfText, S.region); ui.pdfPick = ui.pdfRaces.length ? 0 : null; toast(`${ui.pdfRaces.length} race${ui.pdfRaces.length === 1 ? '' : 's'} found`); break;
+      case 'pdf-split': ui.pdfMeta = null; ui.pdfText = $('#pdfText').value; ui.pdfRaces = splitRaces(ui.pdfText, S.region); ui.pdfPick = ui.pdfRaces.length ? 0 : null; toast(`${ui.pdfRaces.length} race${ui.pdfRaces.length === 1 ? '' : 's'} found`); break;
       case 'pdf-pick': ui.pdfPick = +chip.dataset.i; break;
       case 'pdf-import-one': { const r = importParsed(ui.pdfRaces[ui.pdfPick]); ui.open[r.id] = true; toast(`Race ${r.no} imported — check it on the Card tab`); break; }
       case 'pdf-import-all': { ui.pdfRaces.forEach(importParsed); toast(`${ui.pdfRaces.length} races imported`); S.tab = 'card'; break; }
