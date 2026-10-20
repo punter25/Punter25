@@ -260,33 +260,49 @@
 
   function viewImport() {
     const R = REGIONS[S.region];
-    if (!R.pdf) return `<div class="panel"><h2>Hong Kong — manual entry</h2><p class="hint">Computaform isn't available for Hong Kong, so the PDF import is switched off here. On the Card tab, add each race and enter runners with <b>+ Runner</b> or <b>Quick add</b> (paste lines like <code>1, Horse, Draw, Weight, Odds</code> from the HKJC race card).</p><button class="btn" data-tab-go="card">Go to Card</button></div>`;
     const m = meeting();
     if (!m) return noMeeting('<br>The import adds races to the selected meeting.');
-    let h = `<div class="panel"><h2>Computaform PDF</h2>
+    let h;
+    if (!R.pdf) {
+      h = `<div class="panel"><h2>Paste HKJC race card</h2>
+      <ol class="hint" style="padding-left:18px;margin:0 0 12px">
+        <li>Open the <a href="https://racing.hkjc.com/en-us/local/information/racecard" target="_blank" rel="noopener" style="color:var(--gold)">HKJC Race Card</a> and pick the race.</li>
+        <li>Select from the <b>Race 1 – …</b> heading down to the last runner in the table, then Copy.</li>
+        <li>Paste below and tap <b>Read race card</b>. Repeat for each race — you can paste several races at once.</li>
+      </ol>
+      <textarea id="hkText" placeholder="Race 1 - SHEK MUN HANDICAP&#10;Monday, October 19, 2026, Sha Tin, 12:30&#10;Turf, &quot;C+3&quot; Course, 1800M, Good&#10;…&#10;Horse No.  Last 6 Runs  Colour  Horse  Brand No.  Wt.  Jockey …">${esc(ui.hkText || '')}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn" data-action="hk-parse">Read race card</button><button class="btn quiet" data-action="hk-clear">Clear</button></div>
+      <p class="hint" style="margin:10px 0 0">Odds aren't on the race card. Type them on the Card tab, or copy the runner table from the HKJC betting page (it has a <b>Win</b> column) and paste it here to add the odds to the same race.</p>`;
+    } else {
+    h = `<div class="panel"><h2>Computaform PDF</h2>
       <p class="hint">Upload your ${R.name} Computaform PDF. The text is read on your device — nothing is uploaded anywhere.</p>
       <div class="row"><input type="file" id="pdfFile" accept="application/pdf,.pdf" style="flex:1;min-width:200px"><button class="btn" data-action="pdf-extract">Extract text</button></div>
       <p class="hint" style="margin:10px 0 0">Scanned (image) PDFs can't be read — copy the text from your PDF reader and paste it below instead.</p></div>
       <div class="panel"><h2>Race-card text</h2>
       <textarea id="pdfText" placeholder="Extracted or pasted Computaform text appears here. You can edit it before importing.">${esc(ui.pdfText)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn quiet" data-action="pdf-split">Find races</button></div>`;
-    if (ui.pdfMeta) {
+    }
+    if (ui.pdfMeta && ui.pdfMeta.layout === 'HK') {
+      const M = ui.pdfMeta;
+      h += `<div class="editor" style="margin-top:14px"><b>HKJC race card recognised</b> — ${esc(M.meeting.track || 'venue not in paste')} ${esc(M.meeting.date || '')}<br><span class="hint" style="margin:0">${M.races.length} race${M.races.length === 1 ? '' : 's'} · ${M.runners} runners · jockeys ${M.jockeys}/${M.runners} · trainers ${M.trainers}/${M.runners}. Last 6 runs, rating and rating change, draw, weight, gear and days since last run are included. Form, Class move and Draw scores are pre-filled.</span></div>`;
+      if (M.races.some(r => !r.no)) h += `<div class="row" style="margin-top:8px"><label for="hkTarget" style="margin:0">No race heading in the paste — import into race no.</label><input id="hkTarget" type="number" min="1" style="width:80px" value="${esc(ui.hkTarget || nextRaceNo(m))}"></div>`;
+    } else if (ui.pdfMeta) {
       const M = ui.pdfMeta;
       h += `<div class="editor" style="margin-top:14px"><b>Computaform ${M.layout === 'UK' ? 'UK' : 'SA'} layout recognised</b> — ${esc((M.meeting.sponsor ? M.meeting.sponsor + ' ' : '') + (M.meeting.track || ''))} ${esc(M.meeting.date || '')}<br><span class="hint" style="margin:0">${M.races.length} races · ${M.runners} runners · jockeys matched ${M.jockeys}/${M.runners} · trainers matched ${M.trainers}/${M.runners}. ${M.layout === 'UK' ? 'Draw, weight, handicap rating, speed rating, recent form, betting forecast, Top 3 Computer Ratings and last-run comments are included.' + (M.races.some(r => r.runners.some(x => x.oddsEst)) ? ' Runners priced only as "others" in the betting forecast get an estimated price.' : '') : 'Stars, comments, Computaform odds (F/B) and top-4 Computaform &amp; Speed ratings are included.'}</span></div>`;
     }
     if (ui.pdfRaces.length) {
-      h += `<h3 style="margin-top:14px">Races found</h3><div class="chips">${ui.pdfRaces.map((r, i) => `<button class="chip" data-action="pdf-pick" data-i="${i}" aria-pressed="${ui.pdfPick === i}">Race ${r.no} · ${r.runners.length} runners</button>`).join('')}</div>
-        <div class="row"><button class="btn" data-action="pdf-import-all">Import all ${ui.pdfRaces.length} races</button></div>`;
+      h += `<h3 style="margin-top:14px">Races found</h3><div class="chips">${ui.pdfRaces.map((r, i) => `<button class="chip" data-action="pdf-pick" data-i="${i}" aria-pressed="${ui.pdfPick === i}">Race ${r.no || '?'} · ${r.runners.length} runners</button>`).join('')}</div>
+        <div class="row"><button class="btn" data-action="pdf-import-all">${ui.pdfRaces.length === 1 ? 'Import this race' : `Import all ${ui.pdfRaces.length} races`}</button></div>`;
     }
     if (ui.pdfPick != null && ui.pdfRaces[ui.pdfPick]) {
       const pr = ui.pdfRaces[ui.pdfPick];
-      h += `<h3 style="margin-top:16px">Race ${pr.no} preview</h3><p class="hint">${esc([pr.time, pr.distance ? pr.distance + 'm' : '', pr.surface, pr.cls, pr.prize].filter(Boolean).join(' · ') || pr.head || '')}</p>
-        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">${ui.pdfMeta && ui.pdfMeta.layout === 'UK' ? 'Odds' : 'F/B'}</th><th class="n hide-sm">${ui.pdfMeta && ui.pdfMeta.layout === 'UK' ? 'Top3' : 'CF'}</th><th class="n hide-sm">SR</th></tr></thead><tbody>
-        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}${r.stars ? `<span class="tag ai">${'X'.repeat(r.stars)}</span>` : ''}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / '))}${r.formFig ? ' · Form ' + esc(r.formFig) : ''}${r.hr ? ' · HR ' + r.hr : ''}${r.comment ? ' · ' + esc(r.comment) : ''}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td><td class="n hide-sm">${r.cf ? (r.cf.v != null ? r.cf.v : '#' + r.cf.rank) : '–'}</td><td class="n hide-sm">${r.sr ? r.sr.v : (r.spd != null ? r.spd : '–')}</td></tr>`).join('') || '<tr><td colspan="7">No runner lines detected in this race.</td></tr>'}
+      h += `<h3 style="margin-top:16px">Race ${pr.no || '?'} preview</h3><p class="hint">${esc([pr.time, pr.distance ? pr.distance + 'm' : '', pr.surface, pr.cls, pr.prize].filter(Boolean).join(' · ') || pr.head || '')}</p>
+        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">${ui.pdfMeta && ui.pdfMeta.layout !== 'SA' ? 'Odds' : 'F/B'}</th><th class="n hide-sm">${ui.pdfMeta && ui.pdfMeta.layout === 'HK' ? 'Rtg' : ui.pdfMeta && ui.pdfMeta.layout === 'UK' ? 'Top3' : 'CF'}</th><th class="n hide-sm">${ui.pdfMeta && ui.pdfMeta.layout === 'HK' ? '+/-' : 'SR'}</th></tr></thead><tbody>
+        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}${r.stars ? `<span class="tag ai">${'X'.repeat(r.stars)}</span>` : ''}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / '))}${r.last6 ? ' · Last 6 ' + esc(r.last6) : r.formFig ? ' · Form ' + esc(r.formFig) : ''}${r.claim ? ' · claim ' + r.claim : ''}${r.gear ? ' · ' + esc(r.gear) : ''}${r.hr ? ' · HR ' + r.hr : ''}${r.comment ? ' · ' + esc(r.comment) : ''}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td><td class="n hide-sm">${r.rtg != null ? r.rtg : r.cf ? (r.cf.v != null ? r.cf.v : '#' + r.cf.rank) : '–'}</td><td class="n hide-sm">${r.rtgChg != null ? (r.rtgChg > 0 ? '+' : '') + r.rtgChg : r.sr ? r.sr.v : (r.spd != null ? r.spd : '–')}</td></tr>`).join('') || '<tr><td colspan="7">No runner lines detected in this race.</td></tr>'}
         </tbody></table></div>
-        <div class="row" style="margin-top:10px"><button class="btn" data-action="pdf-import-one">Import race ${pr.no}</button></div>`;
+        <div class="row" style="margin-top:10px"><button class="btn" data-action="pdf-import-one">Import race ${pr.no || ''}</button></div>`;
     }
-    h += `<p class="hint" style="margin-top:14px">Always check names, draws, weights and odds after importing — Computaform layouts vary, so the import is a starting point.</p></div>`;
+    h += `<p class="hint" style="margin-top:14px">Always check names, draws, weights and odds after importing — the import is a starting point.</p></div>`;
     return h;
   }
 
@@ -448,28 +464,35 @@
 
   function importParsed(pr) {
     const m = meeting(); if (!m) return;
-    let race = m.races.find(r => +r.no === +pr.no);
-    if (!race) { race = newRace(m, pr.no); }
+    const no = pr.no || +ui.hkTarget || nextRaceNo(m);
+    let race = m.races.find(r => +r.no === +no);
+    if (!race) { race = newRace(m, no); }
     if (pr.distance && !race.distance) race.distance = pr.distance;
     if (pr.time && !race.time) race.time = pr.time;
     if (pr.cls && !race.cls) race.cls = pr.cls + (pr.surface && pr.surface !== 'TURF' ? ' · ' + pr.surface : '');
     if (ui.pdfMeta && ui.pdfMeta.meeting.track && (!m.track || m.track === ui.pdfMeta.meeting.track)) {
       m.track = ui.pdfMeta.meeting.track; if (ui.pdfMeta.meeting.date) m.date = ui.pdfMeta.meeting.date;
+      const gv = ui.pdfMeta.meeting.going; if (gv) { const g = REGIONS[m.region].going.find(x => x.toLowerCase() === gv.toLowerCase()); if (g) m.going = g; }
     }
     const rankScore = x => x ? [9, 8, 7, 6][x.rank - 1] || 5 : 5;
     for (const p of pr.runners) {
       const info = { no: p.no, name: p.name, draw: p.draw, weight: p.weight, odds: p.odds, jockey: p.jockey || '', trainer: p.trainer || '' };
+      const oddsOnly = ui.pdfMeta && ui.pdfMeta.layout === 'HK' && !p.last6 && !p.draw && p.odds; // betting-page paste: only refresh odds
       if (p.stars != null) info.stars = p.stars;
-      const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.formFig ? 'Form ' + p.formFig : '', p.hr ? 'HR ' + p.hr : '', p.gear ? 'Gear ' + p.gear : '',
+      const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.last6 ? 'Last 6 ' + p.last6 : p.formFig ? 'Form ' + p.formFig : '',
+        p.rtg != null ? `Rtg ${p.rtg}${p.rtgChg != null ? ' (' + (p.rtgChg > 0 ? '+' : '') + p.rtgChg + ')' : ''}` : '', p.claim ? 'Claim ' + p.claim : '', p.overwt ? 'Overwt ' + p.overwt : '',
+        p.days ? p.days + ' days' : '', p.best ? 'Best ' + p.best : '', p.hr ? 'HR ' + p.hr : '', p.gear ? 'Gear ' + p.gear : '',
         p.cf ? (p.cf.v != null ? `CF ${p.cf.v} (#${p.cf.rank})` : `Top-3 rating #${p.cf.rank}`) : '', p.sr ? `SR ${p.sr.v} (#${p.sr.rank})` : (p.spd != null ? `SR ${p.spd}` : ''),
         p.oddsEst ? 'odds est.' : '', p.comment || ''].filter(Boolean).join(' · ');
       if (notes) info.form = notes;
       const clean = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== '' && v != null));
       const ex = race.runners.find(r => +r.no === +p.no);
+      if (ex && oddsOnly) { ex.odds = p.odds; continue; }
       if (ex) Object.assign(ex, clean);
       else {
         const nr = newRunner(clean); const keys = REGIONS[m.region].factors.map(f => f[0]);
         // Seed ratings from Computaform: stars → Form, Computaform rating rank → Class, Speed rating rank → Last 600m
+        if (p.seed) Object.entries(p.seed).forEach(([k, v]) => { if (keys.includes(k) && v) nr.f[k] = v; });
         if (p.stars != null && keys.includes('form')) nr.f.form = [5, 6, 7, 8][p.stars] || 5;
         if (p.recent && p.recent.length && keys.includes('form')) { const av = p.recent.reduce((x, y) => x + y, 0) / p.recent.length; nr.f.form = av <= 1.5 ? 9 : av <= 2.5 ? 8 : av <= 3.5 ? 7 : av <= 5 ? 6 : av <= 7 ? 5 : 4; }
         if (p.cf && keys.includes('class')) nr.f.class = rankScore(p.cf);
@@ -485,6 +508,7 @@
     const m = { id: uid(), region: S.region, date: today(), track: '', card: 'Punters Challenge', going: REGIONS[S.region].going[0], races: [] };
     S.meetings.push(m); S.active[S.region] = m.id; save(); return m;
   }
+  function nextRaceNo(m) { return m.races.reduce((a, x) => Math.max(a, +x.no || 0), 0) + 1; }
   function newRace(m, no) {
     const r = { id: uid(), no: no || (m.races.reduce((a, x) => Math.max(a, +x.no || 0), 0) + 1), time: '', distance: '', cls: '', runners: [], selId: null, result: {} };
     m.races.push(r); return r;
@@ -498,7 +522,7 @@
 
   // ---------- Events ----------
   document.addEventListener('click', async e => {
-    const rb = e.target.closest('.regions button'); if (rb) { S.region = rb.dataset.region; ui.edit = null; ui.pdfRaces = []; ui.pdfPick = null; save(); return render(); }
+    const rb = e.target.closest('.regions button'); if (rb) { S.region = rb.dataset.region; ui.edit = null; ui.pdfRaces = []; ui.pdfPick = null; ui.pdfMeta = null; save(); return render(); }
     const tb = e.target.closest('.tabs button, [data-tab-go]'); if (tb) { S.tab = tb.dataset.tab || tb.dataset.tabGo; save(); render(); return window.scrollTo(0, 0); }
     const chip = e.target.closest('[data-action]'); if (!chip) return;
     const a = chip.dataset.action; const m = meeting();
@@ -538,8 +562,15 @@
         break; }
       case 'pdf-split': ui.pdfMeta = null; ui.pdfText = $('#pdfText').value; ui.pdfRaces = splitRaces(ui.pdfText, S.region); ui.pdfPick = ui.pdfRaces.length ? 0 : null; toast(`${ui.pdfRaces.length} race${ui.pdfRaces.length === 1 ? '' : 's'} found`); break;
       case 'pdf-pick': ui.pdfPick = +chip.dataset.i; break;
-      case 'pdf-import-one': { const r = importParsed(ui.pdfRaces[ui.pdfPick]); ui.open[r.id] = true; toast(`Race ${r.no} imported — check it on the Card tab`); break; }
-      case 'pdf-import-all': { ui.pdfRaces.forEach(importParsed); toast(`${ui.pdfRaces.length} races imported`); S.tab = 'card'; break; }
+      case 'hk-parse': {
+        ui.hkText = $('#hkText').value;
+        const res = HKJC.parseHKJC(ui.hkText);
+        if (!res.runners) { toast('No runners recognised — copy the runner table including its header row'); ui.pdfMeta = null; ui.pdfRaces = []; ui.pdfPick = null; break; }
+        ui.pdfMeta = res; ui.pdfRaces = res.races; ui.pdfPick = 0; ui.hkTarget = '';
+        toast(`${res.races.length} race${res.races.length === 1 ? '' : 's'}, ${res.runners} runners read`); break; }
+      case 'hk-clear': ui.hkText = ''; ui.pdfMeta = null; ui.pdfRaces = []; ui.pdfPick = null; break;
+      case 'pdf-import-one': { const tg = $('#hkTarget'); if (tg) ui.hkTarget = tg.value; const r = importParsed(ui.pdfRaces[ui.pdfPick]); ui.open[r.id] = true; toast(`Race ${r.no} imported — check it on the Card tab`); break; }
+      case 'pdf-import-all': { const tg = $('#hkTarget'); if (tg) ui.hkTarget = tg.value; ui.pdfRaces.forEach(importParsed); toast(`${ui.pdfRaces.length} races imported`); S.tab = 'card'; break; }
       case 'copy-slip': { const t = slipText(m); try { await navigator.clipboard.writeText(t); toast('Slip copied'); } catch (err) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Slip copied'); } return; }
       case 'share-slip': { const t = slipText(m); if (navigator.share) { try { await navigator.share({ title: 'Punter25 selections', text: t }); } catch (err) { /* cancelled */ } } else { toast('Sharing not supported here — use Copy'); } return; }
       case 'print': window.print(); return;
@@ -555,6 +586,8 @@
     const t = e.target; const m = meeting();
     if (t.id === 'meetingSelect') { S.active[S.region] = t.value; ui.edit = null; save(); return render(); }
     if (t.id === 'pdfText') { ui.pdfText = t.value; return; }
+    if (t.id === 'hkText') { ui.hkText = t.value; return; }
+    if (t.id === 'hkTarget') { ui.hkTarget = t.value; return; }
     if (t.id === 'trust') { S.trust = +t.value; save(); return render(); }
     if (t.id === 'importFile') { const f = t.files[0]; if (!f) return; f.text().then(txt => { try { const d = JSON.parse(txt); if (!Array.isArray(d.meetings)) throw 0; S = Object.assign(defaults(), d); save(); render(); toast('Backup imported'); } catch (err) { toast('That file is not a Punter25 backup'); } }); return; }
     if (t.dataset.w) { S.weights[S.region][t.dataset.w] = Math.max(0, +t.value || 0); save(); return; }
