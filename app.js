@@ -272,7 +272,7 @@
       <div class="row" style="margin-top:10px"><button class="btn quiet" data-action="pdf-split">Find races</button></div>`;
     if (ui.pdfMeta) {
       const M = ui.pdfMeta;
-      h += `<div class="editor" style="margin-top:14px"><b>Computaform layout recognised</b> — ${esc((M.meeting.sponsor ? M.meeting.sponsor + ' ' : '') + (M.meeting.track || ''))} ${esc(M.meeting.date || '')}<br><span class="hint" style="margin:0">${M.races.length} races · ${M.runners} runners · jockeys matched ${M.jockeys}/${M.runners} · trainers matched ${M.trainers}/${M.runners}. Stars, comments, Computaform odds (F/B) and top-4 Computaform &amp; Speed ratings are included.</span></div>`;
+      h += `<div class="editor" style="margin-top:14px"><b>Computaform ${M.layout === 'UK' ? 'UK' : 'SA'} layout recognised</b> — ${esc((M.meeting.sponsor ? M.meeting.sponsor + ' ' : '') + (M.meeting.track || ''))} ${esc(M.meeting.date || '')}<br><span class="hint" style="margin:0">${M.races.length} races · ${M.runners} runners · jockeys matched ${M.jockeys}/${M.runners} · trainers matched ${M.trainers}/${M.runners}. ${M.layout === 'UK' ? 'Draw, weight, handicap rating, speed rating, recent form, betting forecast, Top 3 Computer Ratings and last-run comments are included.' + (M.races.some(r => r.runners.some(x => x.oddsEst)) ? ' Runners priced only as "others" in the betting forecast get an estimated price.' : '') : 'Stars, comments, Computaform odds (F/B) and top-4 Computaform &amp; Speed ratings are included.'}</span></div>`;
     }
     if (ui.pdfRaces.length) {
       h += `<h3 style="margin-top:14px">Races found</h3><div class="chips">${ui.pdfRaces.map((r, i) => `<button class="chip" data-action="pdf-pick" data-i="${i}" aria-pressed="${ui.pdfPick === i}">Race ${r.no} · ${r.runners.length} runners</button>`).join('')}</div>
@@ -281,8 +281,8 @@
     if (ui.pdfPick != null && ui.pdfRaces[ui.pdfPick]) {
       const pr = ui.pdfRaces[ui.pdfPick];
       h += `<h3 style="margin-top:16px">Race ${pr.no} preview</h3><p class="hint">${esc([pr.time, pr.distance ? pr.distance + 'm' : '', pr.surface, pr.cls, pr.prize].filter(Boolean).join(' · ') || pr.head || '')}</p>
-        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">F/B</th><th class="n hide-sm">CF</th><th class="n hide-sm">SR</th></tr></thead><tbody>
-        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}${r.stars ? `<span class="tag ai">${'X'.repeat(r.stars)}</span>` : ''}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / '))}${r.comment ? ' · ' + esc(r.comment) : ''}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td><td class="n hide-sm">${r.cf ? r.cf.v : '–'}</td><td class="n hide-sm">${r.sr ? r.sr.v : '–'}</td></tr>`).join('') || '<tr><td colspan="7">No runner lines detected in this race.</td></tr>'}
+        <div class="scroll"><table class="tbl"><thead><tr><th>No</th><th>Horse</th><th class="n">Dr</th><th class="n">Wt</th><th class="n">${ui.pdfMeta && ui.pdfMeta.layout === 'UK' ? 'Odds' : 'F/B'}</th><th class="n hide-sm">${ui.pdfMeta && ui.pdfMeta.layout === 'UK' ? 'Top3' : 'CF'}</th><th class="n hide-sm">SR</th></tr></thead><tbody>
+        ${pr.runners.map(r => `<tr><td>${esc(r.no)}</td><td class="name">${esc(r.name)}${r.stars ? `<span class="tag ai">${'X'.repeat(r.stars)}</span>` : ''}<span class="sub">${esc([r.jockey, r.trainer].filter(Boolean).join(' / '))}${r.formFig ? ' · Form ' + esc(r.formFig) : ''}${r.hr ? ' · HR ' + r.hr : ''}${r.comment ? ' · ' + esc(r.comment) : ''}</span></td><td class="n">${esc(r.draw)}</td><td class="n">${esc(r.weight)}</td><td class="n">${esc(r.odds)}</td><td class="n hide-sm">${r.cf ? (r.cf.v != null ? r.cf.v : '#' + r.cf.rank) : '–'}</td><td class="n hide-sm">${r.sr ? r.sr.v : (r.spd != null ? r.spd : '–')}</td></tr>`).join('') || '<tr><td colspan="7">No runner lines detected in this race.</td></tr>'}
         </tbody></table></div>
         <div class="row" style="margin-top:10px"><button class="btn" data-action="pdf-import-one">Import race ${pr.no}</button></div>`;
     }
@@ -460,7 +460,9 @@
     for (const p of pr.runners) {
       const info = { no: p.no, name: p.name, draw: p.draw, weight: p.weight, odds: p.odds, jockey: p.jockey || '', trainer: p.trainer || '' };
       if (p.stars != null) info.stars = p.stars;
-      const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.comment || '', p.cf ? `CF ${p.cf.v} (#${p.cf.rank})` : '', p.sr ? `SR ${p.sr.v} (#${p.sr.rank})` : ''].filter(Boolean).join(' · ');
+      const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.formFig ? 'Form ' + p.formFig : '', p.hr ? 'HR ' + p.hr : '', p.gear ? 'Gear ' + p.gear : '',
+        p.cf ? (p.cf.v != null ? `CF ${p.cf.v} (#${p.cf.rank})` : `Top-3 rating #${p.cf.rank}`) : '', p.sr ? `SR ${p.sr.v} (#${p.sr.rank})` : (p.spd != null ? `SR ${p.spd}` : ''),
+        p.oddsEst ? 'odds est.' : '', p.comment || ''].filter(Boolean).join(' · ');
       if (notes) info.form = notes;
       const clean = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== '' && v != null));
       const ex = race.runners.find(r => +r.no === +p.no);
@@ -469,6 +471,7 @@
         const nr = newRunner(clean); const keys = REGIONS[m.region].factors.map(f => f[0]);
         // Seed ratings from Computaform: stars → Form, Computaform rating rank → Class, Speed rating rank → Last 600m
         if (p.stars != null && keys.includes('form')) nr.f.form = [5, 6, 7, 8][p.stars] || 5;
+        if (p.recent && p.recent.length && keys.includes('form')) { const av = p.recent.reduce((x, y) => x + y, 0) / p.recent.length; nr.f.form = av <= 1.5 ? 9 : av <= 2.5 ? 8 : av <= 3.5 ? 7 : av <= 5 ? 6 : av <= 7 ? 5 : 4; }
         if (p.cf && keys.includes('class')) nr.f.class = rankScore(p.cf);
         if (p.sr) { if (keys.includes('l600')) nr.f.l600 = rankScore(p.sr); else if (keys.includes('pace')) nr.f.pace = rankScore(p.sr); }
         race.runners.push(nr);
