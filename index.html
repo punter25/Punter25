@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Punter25 — Punters Challenge Selector</title>
+<meta name="description" content="Personal race-card analysis and selection tool for the Hollywoodbets Punters Challenge. SA, Hong Kong and UK racing.">
+<meta name="theme-color" content="#0d1611">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">25</span>
+    <div>
+      <div class="brand-name">Punter25</div>
+      <div class="brand-sub">Punters Challenge selector</div>
+    </div>
+  </div>
+  <nav class="regions" role="tablist" aria-label="Region">
+    <button role="tab" data-region="SA">SA</button>
+    <button role="tab" data-region="HK">HK</button>
+    <button role="tab" data-region="UK">UK</button>
+  </nav>
+</header>
+
+<section class="meeting-bar">
+  <label class="sr" for="meetingSelect">Meeting</label>
+  <select id="meetingSelect"></select>
+  <button class="btn ghost" data-action="new-meeting">+ Meeting</button>
+</section>
+
+<main id="view"></main>
+
+<nav class="tabs" aria-label="Sections">
+  <button data-tab="card"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 10h16M9 10v9"/></svg><span>Card</span></button>
+  <button data-tab="import"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg><span>Import</span></button>
+  <button data-tab="slip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg><span>Slip</span></button>
+  <button data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10m7 10V4m7 16v-7"/></svg><span>Stats</span></button>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
