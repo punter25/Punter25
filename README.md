@@ -10,6 +10,7 @@ A personal race-card analysis and selection tool for the Hollywoodbets Punters C
 - **HKJC paste import** for Hong Kong: copy a race from the [HKJC Race Card](https://racing.hkjc.com/en-us/local/information/racecard) (heading + runner table) and paste it on the Import tab. Reads horse no., last 6 runs, horse, weight, jockey (with claim), draw, trainer, rating and rating +/-, gear, days since last run, plus race time, distance, course, going and class. Pre-fills Form, Class move and Draw. Paste the HKJC betting-page table (Win column) to add odds. Manual / Quick add entry still works too.
 - Rate each runner 1–10 per factor → rating, win chance and **expected Punters Challenge points** (finishing-position points plus the winner's SP bonus).
 - Auto-select per race or the whole card, with TOP / BANKER / VALUE flags.
+- **Model A vs Model B**: every race shows both models' picks and expected points (A xPts / B xPts). Model B has its own factor weights, trust slider and a cap on the winner bonus for estimated prices (default: Class weight +0.08, estimated prices count as at most 8/1). Type the first three horse numbers under each race and both models are scored; Stats compares points, winners, top-3 rate and head-to-head by region. Model A is your selection slip.
 - Selection slip you can copy, share (e.g. WhatsApp) or print.
 - Results entry with automatic points, plus stats by region and meeting history.
 - Data is stored in your browser only. Use **Stats → Export backup** to keep a copy.

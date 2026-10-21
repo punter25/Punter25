@@ -47,14 +47,25 @@
     mem = S;
     try { window.localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* in-memory only */ }
   }
+  // Model B starts as a "Computaform-led" variant: Class (Computaform Top-3 / rating rank) counts more,
+  // and runners whose price is only estimated ("12-1 and better others") earn a capped winner bonus.
+  const B_CLASS_BOOST = 0.08, B_EST_DEFAULT = '8/1';
+  const weightsA = k => Object.fromEntries(REGIONS[k].factors.map(f => [f[0], f[2]]));
+  const weightsBDefault = k => Object.fromEntries(REGIONS[k].factors.map(f => [f[0], +(f[2] + (f[0] === 'class' ? B_CLASS_BOOST : 0)).toFixed(2)]));
   const defaults = () => ({
     region: 'SA', tab: 'card', trust: 0.6, meetings: [], active: { SA: null, HK: null, UK: null },
-    weights: Object.fromEntries(Object.entries(REGIONS).map(([k, r]) => [k, Object.fromEntries(r.factors.map(f => [f[0], f[2]]))]))
+    weights: Object.fromEntries(Object.keys(REGIONS).map(k => [k, weightsA(k)])),
+    weightsB: Object.fromEntries(Object.keys(REGIONS).map(k => [k, weightsBDefault(k)])),
+    trustB: 0.6, estB: B_EST_DEFAULT
   });
   let S = Object.assign(defaults(), load() || {});
   for (const k of Object.keys(REGIONS)) {
-    S.weights[k] = Object.assign(Object.fromEntries(REGIONS[k].factors.map(f => [f[0], f[2]])), S.weights[k] || {});
+    S.weights[k] = Object.assign(weightsA(k), S.weights[k] || {});
+    S.weightsB = S.weightsB || {};
+    S.weightsB[k] = Object.assign(weightsBDefault(k), S.weightsB[k] || {});
   }
+  if (S.trustB == null) S.trustB = 0.6;
+  if (S.estB == null) S.estB = B_EST_DEFAULT;
   const ui = { open: {}, edit: null, pdfText: '', pdfRaces: [], pdfPick: null, preview: null };
 
   // ---------- Helpers ----------
@@ -81,8 +92,11 @@
 
   // ---------- Model ----------
   // Rating 0–100 from weighted 1–10 factor scores. Win probability = blend of rating softmax and market.
-  function analyse(race, region) {
-    const R = REGIONS[region], W = S.weights[region];
+  const isEst = r => !!(r.oddsEst || /odds est\./i.test(r.form || ''));
+  function analyse(race, region, model) {
+    const B = model === 'B';
+    const R = REGIONS[region], W = (B ? S.weightsB : S.weights)[region];
+    const trust = B ? S.trustB : S.trust;
     const tot = R.factors.reduce((a, f) => a + (+W[f[0]] || 0), 0) || 1;
     const live = field(race);
     const out = new Map();
@@ -100,7 +114,7 @@
       pk = raw.map(x => x / s);
     }
     const spread = Math.max(...ratings) - Math.min(...ratings);
-    const a = haveMkt ? (spread < 0.01 ? 0 : S.trust) : 1; // unrated card → follow the market
+    const a = haveMkt ? (spread < 0.01 ? 0 : trust) : 1; // unrated card → follow the market
     const p = pm.map((x, i) => a * x + (1 - a) * (pk ? pk[i] : 0));
     const N = live.length;
     // Harville place probabilities
@@ -115,7 +129,8 @@
       return acc;
     });
     live.forEach((r, i) => {
-      const d = dec(r.odds) || 0;
+      let d = dec(r.odds) || 0;
+      if (B && isEst(r) && dec(S.estB)) d = Math.min(d, dec(S.estB)); // Model B: cap bonus on estimated prices
       const rest = Math.max(0, 1 - p[i] - p2[i] - p3[i]);
       const ep = p[i] * (N + d) + p2[i] * (N - 1) + p3[i] * (N - 2) + rest * Math.max(0, (N - 2) / 2);
       out.set(r.id, { rating: ratings[i], pwin: p[i], ptop3: p[i] + p2[i] + p3[i], ep, d });
@@ -130,14 +145,47 @@
     return out;
   }
 
-  function scoreRace(race) {
-    const res = race.result; if (!res || !res.pos) return null;
-    if (res.override !== '' && res.override != null && !isNaN(+res.override)) return +res.override;
+  // Placings typed as horse numbers, e.g. "3, 2, 1" (1st, 2nd, 3rd …)
+  const placings = race => String((race.result || {}).placings || '').split(/[^0-9]+/).filter(Boolean).map(Number);
+  // Finishing position of a runner: from the placings, else from a typed position.
+  function posOf(race, id, typed) {
+    const r = race.runners.find(x => x.id === id); if (!r) return null;
+    const pl = placings(race), i = pl.indexOf(+r.no); if (i >= 0) return i + 1;
+    if (typed !== '' && typed != null && !isNaN(+typed) && +typed > 0) return +typed;
+    // Unplaced but exact position unknown: use the average unplaced position (4th..last) → estimated points
     const N = +race.fieldSize || field(race).length;
-    const pos = +res.pos;
+    if (pl.length >= 3 && N > 3) return (N + 4) / 2;
+    return null;
+  }
+  const isEstPos = (race, id, typed) => { const r = race.runners.find(x => x.id === id); return !!r && placings(race).length >= 3 && !placings(race).includes(+r.no) && !(typed !== '' && typed != null && +typed > 0); };
+  function pointsFor(race, id, pos) {
+    if (!id || pos == null) return null;
+    const res = race.result || {};
+    const N = +race.fieldSize || field(race).length;
     let pts = Math.max(0, N - pos + 1);
-    if (pos === 1) { const selR = race.runners.find(x => x.id === race.selId); const sp = (res.sp != null && res.sp !== '') ? res.sp : (selR && selR.odds); pts += dec(sp) || 0; }
+    if (pos === 1) { const r = race.runners.find(x => x.id === id); const sp = (res.sp != null && res.sp !== '') ? res.sp : (r && r.odds); pts += dec(sp) || 0; }
     return pts;
+  }
+  // Model A = your selection slip (Model A's pick unless you changed it)
+  function posA(race) { const res = race.result || {}; return posOf(race, race.selId, res.pos); }
+  function scoreRace(race) {
+    const res = race.result || {};
+    const pos = posA(race); if (pos == null) return null;
+    if (res.override !== '' && res.override != null && !isNaN(+res.override)) return +res.override;
+    return pointsFor(race, race.selId, pos);
+  }
+  // Model B: its saved pick (set by Auto-select), or its current best if never saved
+  function pickB(race, region) { if (race.selB && race.runners.some(x => x.id === race.selB && !x.scr)) return race.selB; return analyse(race, region, 'B').best || null; }
+  function posB(race, region) {
+    const id = pickB(race, region); if (!id) return null; const res = race.result || {};
+    if (id === race.selId) return posA(race);
+    return posOf(race, id, res.posB);
+  }
+  function scoreB(race, region) {
+    const id = pickB(race, region), pos = posB(race, region); if (pos == null) return null;
+    const res = race.result || {};
+    if (id === race.selId && res.override !== '' && res.override != null && !isNaN(+res.override)) return +res.override;
+    return pointsFor(race, id, pos);
   }
 
   // ---------- Rendering ----------
@@ -180,15 +228,17 @@
   function raceBlock(m, race) {
     const R = REGIONS[m.region];
     const A = analyse(race, m.region);
+    const AB = analyse(race, m.region, 'B');
     const sel = race.runners.find(x => x.id === race.selId);
+    const bId = pickB(race, m.region); const selB = race.runners.find(x => x.id === bId);
     const open = ui.open[race.id];
-    const pts = scoreRace(race);
+    const pts = scoreRace(race), ptsB = scoreB(race, m.region);
     let h = `<article class="race ${open ? '' : 'closed'}" data-race="${race.id}">
       <div class="race-head" data-action="toggle-race">
         <div class="race-no">R${esc(race.no)}</div>
         <div class="race-meta"><div class="t">${esc(race.time || '--:--')} · ${esc(race.distance || '?')}${race.distance && /^\d+$/.test(race.distance) ? 'm' : ''}</div>
-          <div class="s">${esc(race.cls || 'Class n/a')} · ${field(race).length} runners${pts != null ? ` · <span style="color:var(--green)">${fmt(pts)} pts</span>` : ''}</div></div>
-        <div class="pick">${sel ? `Selection<b>#${esc(sel.no)} ${esc(sel.name)}</b>` : '<span style="color:var(--faint)">No selection</span>'}</div>
+          <div class="s">${esc(race.cls || 'Class n/a')} · ${field(race).length} runners${pts != null || ptsB != null ? ` · <span style="color:var(--green)">A ${pts != null ? fmt(pts) : '–'} · B ${ptsB != null ? fmt(ptsB) : '–'} pts</span>` : ''}</div></div>
+        <div class="pick">${sel ? `A<b>#${esc(sel.no)} ${esc(sel.name)}</b>` : '<span style="color:var(--faint)">A: no selection</span>'}${selB ? `<span class="pickb">B <b>#${esc(selB.no)} ${esc(selB.name)}</b>${selB.id === race.selId ? ' <span class="same">same</span>' : ''}</span>` : ''}</div>
       </div>`;
     if (!open) return h + '</article>';
     h += `<div class="race-body"><div class="grid">
@@ -198,10 +248,10 @@
         <div><label>Class</label><input data-r="cls" value="${esc(race.cls)}"></div>
       </div>`;
     if (race.runners.length) {
-      h += `<div class="scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th></th><th>No</th><th>Horse</th><th class="n hide-sm">Dr</th><th class="n hide-sm">Wt</th><th class="n">Odds</th><th class="n hide-sm">Rtg</th><th class="n">Win%</th><th class="n">xPts</th></tr></thead><tbody>`;
+      h += `<div class="scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th></th><th>No</th><th>Horse</th><th class="n hide-sm">Dr</th><th class="n hide-sm">Wt</th><th class="n">Odds</th><th class="n hide-sm">Rtg</th><th class="n hide-sm">Win%</th><th class="n">A xPts</th><th class="n colb" title="Model B expected points">B xPts</th></tr></thead><tbody>`;
       race.runners.slice().sort((a, b) => (+a.no || 99) - (+b.no || 99)).forEach(r => {
-        const x = A.get(r.id);
-        const tags = x ? (r.id === A.best ? '<span class="tag ai">TOP</span>' : '') + (r.id === A.bank ? '<span class="tag bank">BANKER</span>' : '') + (r.id === A.val ? '<span class="tag val">VALUE</span>' : '') : '';
+        const x = A.get(r.id), xb = AB.get(r.id);
+        const tags = x ? (r.id === A.best ? '<span class="tag ai">TOP</span>' : '') + (r.id === A.bank ? '<span class="tag bank">BANKER</span>' : '') + (r.id === A.val ? '<span class="tag val">VALUE</span>' : '') + (r.id === bId ? '<span class="tag mb">B PICK</span>' : '') + (isEst(r) ? '<span class="tag est" title="Price estimated from the betting forecast">EST</span>' : '') : '';
         h += `<tr class="${r.id === race.selId ? 'sel' : ''} ${r.scr ? 'scr' : ''}">
           <td><input class="radio" type="radio" name="sel-${race.id}" data-action="select" data-id="${r.id}" ${r.id === race.selId ? 'checked' : ''} ${r.scr ? 'disabled' : ''} aria-label="Select ${esc(r.name)}"></td>
           <td class="n">${esc(r.no)}</td>
@@ -209,9 +259,10 @@
           <td class="n hide-sm">${esc(r.draw)}</td><td class="n hide-sm">${esc(r.weight)}</td>
           <td class="n">${esc(r.odds || '–')}</td>
           <td class="n hide-sm">${x ? fmt(x.rating, 0) : '–'}</td>
-          <td class="n">${x ? fmt(x.pwin * 100, 0) : '–'}</td>
-          <td class="n"><b>${x ? fmt(x.ep) : '–'}</b></td></tr>`;
-        if (ui.edit === r.id) h += `<tr><td colspan="9" style="padding:0">${runnerEditor(r, R)}</td></tr>`;
+          <td class="n hide-sm">${x ? fmt(x.pwin * 100, 0) : '–'}</td>
+          <td class="n"><b>${x ? fmt(x.ep) : '–'}</b></td>
+          <td class="n colb">${xb ? fmt(xb.ep) : '–'}</td></tr>`;
+        if (ui.edit === r.id) h += `<tr><td colspan="10" style="padding:0">${runnerEditor(r, R)}</td></tr>`;
       });
       h += `</tbody></table></div>`;
     } else {
@@ -220,7 +271,7 @@
     h += `<div class="row" style="margin-top:12px">
         <button class="btn sm" data-action="add-runner">+ Runner</button>
         <button class="btn quiet sm" data-action="quick-add">Quick add</button>
-        <button class="btn quiet sm" data-action="auto">Auto-select best</button>
+        <button class="btn quiet sm" data-action="auto">Auto-select (A + B)</button>
         <button class="btn danger sm" data-action="del-race" style="margin-left:auto">Delete race</button>
       </div>`;
     if (ui.quick === race.id) {
@@ -229,13 +280,19 @@
         <div class="row" style="margin-top:8px"><button class="btn sm" data-action="quick-save">Add runners</button><button class="btn quiet sm" data-action="quick-cancel">Cancel</button></div></div>`;
     }
     const res = race.result || {};
+    const pl = placings(race);
+    const aIn = sel && pl.includes(+sel.no), bIn = selB && pl.includes(+selB.no);
+    const winR = pl.length ? race.runners.find(x => +x.no === pl[0]) : null;
+    const needB = selB && selB.id !== race.selId && !bIn;
     h += `<div class="result">
-        <div><label>Your horse finished</label><input type="number" min="1" data-res="pos" value="${esc(res.pos)}" placeholder="Position"></div>
-        <div><label>SP (if it won)</label><input data-res="sp" value="${esc(res.sp != null ? res.sp : (sel ? sel.odds : ''))}" placeholder="e.g. 12/1"></div>
-        <div><label>Points override</label><input data-res="override" value="${esc(res.override)}" placeholder="Dead-heat etc."></div>
-        <div class="points" aria-label="Points">${pts != null ? fmt(pts) + ' pts' : ''}</div>
+        <div class="wide"><label>Result — horse numbers 1st, 2nd, 3rd</label><input data-res="placings" value="${esc(res.placings || '')}" placeholder="e.g. 3, 2, 1" inputmode="numeric"></div>
+        <div><label>Winner's SP</label><input data-res="sp" value="${esc(res.sp != null ? res.sp : (winR ? winR.odds : ''))}" placeholder="e.g. 12/1"></div>
+        <div><label>A horse finished${aIn ? ' (from result)' : ''}</label><input type="number" min="1" data-res="pos" value="${esc(aIn ? pl.indexOf(+sel.no) + 1 : res.pos)}" placeholder="Position" ${aIn ? 'disabled' : ''}></div>
+        ${needB ? `<div><label>B horse finished</label><input type="number" min="1" data-res="posB" value="${esc(res.posB)}" placeholder="Position"></div>` : ''}
+        <div><label>Points override (A)</label><input data-res="override" value="${esc(res.override)}" placeholder="Dead-heat etc."></div>
+        <div class="points" aria-label="Points">${pts != null ? 'A ' + fmt(pts) + (isEstPos(race, race.selId, res.pos) ? '<small> est</small>' : '') : ''}${ptsB != null ? `<span class="pb">B ${fmt(ptsB)}${isEstPos(race, bId, bId === race.selId ? res.pos : res.posB) ? '<small> est</small>' : ''}</span>` : ''}</div>
       </div>
-      <p class="hint" style="margin:8px 0 0">Points = field size − position + 1. A winner also earns its SP as decimal odds (e.g. 12/1 → +13). Disqualified = last. Field size: <input style="width:70px;min-height:32px;padding:4px 6px;display:inline-block" type="number" data-r="fieldSize" value="${esc(race.fieldSize || '')}" placeholder="${field(race).length}"></p>
+      <p class="hint" style="margin:8px 0 0">Type the first three horse numbers and both models are scored. If a pick finished outside the first three, type its position for exact points; otherwise the app uses an estimate (marked est). Points = field size − position + 1. A winner also earns its SP as decimal odds (e.g. 12/1 → +13). Disqualified = last. Field size: <input style="width:70px;min-height:32px;padding:4px 6px;display:inline-block" type="number" data-r="fieldSize" value="${esc(race.fieldSize || '')}" placeholder="${field(race).length}"></p>
     </div></article>`;
     return h;
   }
@@ -315,6 +372,14 @@
     });
     return lines.filter((l, i) => l !== '' || i === 2).join('\n');
   }
+  function slipTextB(m) {
+    const lines = [`MODEL B — ${m.track || 'Meeting'} ${m.date} (${m.region})`, ''];
+    m.races.slice().sort((a, b) => a.no - b.no).forEach(r => {
+      const id = pickB(r, m.region); const s = r.runners.find(x => x.id === id);
+      lines.push(`R${r.no}${r.time ? ' ' + r.time : ''}  ` + (s ? `#${s.no} ${s.name}${s.odds ? ' (' + s.odds + ')' : ''}${s.id === r.selId ? '  = A' : ''}` : '— no pick —'));
+    });
+    return lines.join('\n');
+  }
 
   function viewSlip() {
     const m = meeting(); if (!m) return noMeeting();
@@ -324,17 +389,52 @@
       ${missing ? `<p class="hint" style="color:var(--red)">${missing} race${missing > 1 ? 's have' : ' has'} no selection — a missed race scores zero.</p>` : '<p class="hint">Every race has a selection. Submit at least 5 minutes before the first race.</p>'}
       <div class="slip" id="slipText">${esc(slipText(m))}</div>
       <p class="hint" style="margin-top:10px">Projected total: <b style="color:var(--gold)">${fmt(xp)} pts</b></p>
-      <div class="row noprint"><button class="btn" data-action="copy-slip">Copy</button><button class="btn quiet" data-action="share-slip">Share</button><button class="btn quiet" data-action="print">Print</button></div></div>`;
+      <div class="row noprint"><button class="btn" data-action="copy-slip">Copy</button><button class="btn quiet" data-action="share-slip">Share</button><button class="btn quiet" data-action="print">Print</button></div></div>
+      <div class="panel"><h2>Model B picks</h2>
+      <p class="hint">For comparison only. Submit one slip to Hollywoodbets. Races marked "= A" have the same horse in both models.</p>
+      <div class="slip">${esc(slipTextB(m))}</div>
+      <p class="hint" style="margin-top:10px">Model B projected total: <b style="color:var(--violet)">${fmt(m.races.reduce((t, r) => { const id = pickB(r, m.region); const x = id && analyse(r, m.region, 'B').get(id); return t + (x ? x.ep : 0); }, 0))} pts</b> · picks differ in ${m.races.filter(r => { const id = pickB(r, m.region); return id && r.selId && id !== r.selId; }).length} of ${m.races.length} races</p>
+      <div class="row noprint"><button class="btn quiet" data-action="copy-slip-b">Copy Model B</button></div></div>`;
   }
 
   function viewStats() {
-    const rows = []; const by = {};
+    const rows = []; const by = {}; const cmp = [];
     for (const m of S.meetings) {
-      let mp = 0, ms = 0;
-      for (const r of m.races) { const p = scoreRace(r); if (p == null) continue;
-        const pos = +r.result.pos; rows.push({ region: m.region, p, pos }); mp += p; ms++; }
-      m._pts = mp; m._scored = ms;
+      let mp = 0, ms = 0, mb = 0, mbs = 0;
+      for (const r of m.races) {
+        const p = scoreRace(r), pb = scoreB(r, m.region);
+        if (p != null) { rows.push({ region: m.region, p, pos: posA(r) }); mp += p; ms++; }
+        if (pb != null) { mb += pb; mbs++; }
+        if (p != null && pb != null) cmp.push({ region: m.region, a: p, b: pb, pa: posA(r), pb: posB(r, m.region), diff: pickB(r, m.region) !== r.selId });
+      }
+      m._pts = mp; m._scored = ms; m._ptsB = mb; m._scoredB = mbs;
     }
+    const cg = list => ({ n: list.length, a: list.reduce((t, x) => t + x.a, 0), b: list.reduce((t, x) => t + x.b, 0),
+      wa: list.filter(x => x.pa === 1).length, wb: list.filter(x => x.pb === 1).length,
+      ta: list.filter(x => x.pa <= 3).length, tb: list.filter(x => x.pb <= 3).length,
+      d: list.filter(x => x.diff).length, aBetter: list.filter(x => x.a > x.b).length, bBetter: list.filter(x => x.b > x.a).length });
+    const reg = cmp.filter(x => x.region === S.region);
+    const C = cg(reg);
+    const pc = (k, n) => n ? fmt(k / n * 100, 0) + '%' : '–';
+    const lead = C.n ? (Math.abs(C.a - C.b) < 0.05 ? 'Level so far' : (C.a > C.b ? `Model A leads by ${fmt(C.a - C.b)} pts` : `Model B leads by ${fmt(C.b - C.a)} pts`)) : '';
+    const RB = REGIONS[S.region], WB = S.weightsB[S.region];
+    const cmpHtml = `<div class="panel"><h2>Model A vs Model B — ${RB.name}</h2>
+      ${C.n ? `<p class="hint">Model A = your selection slip. ${C.n} race${C.n === 1 ? '' : 's'} with results for both. Picks differed in ${C.d}. <b style="color:var(--text)">${lead}</b>${C.n < 40 ? ' — still a small sample; aim for about 40 races before switching.' : '.'}</p>
+      <div class="scroll"><table class="tbl cmp"><thead><tr><th></th><th class="n">Model A</th><th class="n colb">Model B</th></tr></thead><tbody>
+        <tr><td>Points</td><td class="n"><b>${fmt(C.a)}</b></td><td class="n colb"><b>${fmt(C.b)}</b></td></tr>
+        <tr><td>Avg / race</td><td class="n">${fmt(C.a / C.n)}</td><td class="n colb">${fmt(C.b / C.n)}</td></tr>
+        <tr><td>Winners</td><td class="n">${C.wa}</td><td class="n colb">${C.wb}</td></tr>
+        <tr><td>Top-3 rate</td><td class="n">${pc(C.ta, C.n)}</td><td class="n colb">${pc(C.tb, C.n)}</td></tr>
+        <tr><td>Races won head-to-head</td><td class="n">${C.aBetter}</td><td class="n colb">${C.bBetter}</td></tr>
+      </tbody></table></div>` : `<p class="hint">No ${RB.name} races with results yet. On the Card tab, type the first three horse numbers under each race and both models are scored automatically.</p>`}
+      </div>
+      <div class="panel"><h2>Model B settings — ${RB.name}</h2>
+      <p class="hint">Model B uses the same runner ratings as Model A but its own weights. Defaults: Class counts more (it carries the Computaform Top 3 / rating rank), and a runner with only an estimated price earns at most the capped winner bonus below.</p>
+      <div class="factors">${RB.factors.map(f => `<div><label>${f[1]}</label><input type="number" step="0.01" min="0" data-wb="${f[0]}" value="${WB[f[0]]}"></div>`).join('')}</div>
+      <div class="grid" style="margin-top:12px"><div><label for="estB">Estimated price counts as (max)</label><input id="estB" value="${esc(S.estB)}" placeholder="8/1"></div></div>
+      <div style="margin-top:14px"><label for="trustB">Model B trust in ratings vs the market: <b id="trustBVal">${Math.round(S.trustB * 100)}%</b></label>
+      <input id="trustB" type="range" min="0" max="1" step="0.05" value="${S.trustB}" style="padding:0;min-height:30px;accent-color:var(--violet)"></div>
+      <div class="row" style="margin-top:10px"><button class="btn quiet sm" data-action="reset-weights-b">Reset Model B</button><button class="btn quiet sm" data-action="copy-a-to-b">Copy Model A weights to B</button></div></div>`;
     const agg = list => ({ n: list.length, pts: list.reduce((a, b) => a + b.p, 0), w: list.filter(x => x.pos === 1).length, t3: list.filter(x => x.pos <= 3).length });
     const all = agg(rows);
     for (const k of Object.keys(REGIONS)) by[k] = agg(rows.filter(r => r.region === k));
@@ -350,8 +450,9 @@
     <div class="panel"><h2>By region</h2><div class="scroll"><table class="tbl"><thead><tr><th>Region</th><th class="n">Races</th><th class="n">Points</th><th class="n">Avg</th><th class="n">Wins</th><th class="n">Top 3</th></tr></thead><tbody>
       ${Object.keys(REGIONS).map(k => `<tr><td>${REGIONS[k].name}</td><td class="n">${by[k].n}</td><td class="n">${fmt(by[k].pts)}</td><td class="n">${by[k].n ? fmt(by[k].pts / by[k].n) : '–'}</td><td class="n">${by[k].w}</td><td class="n">${by[k].n ? fmt(by[k].t3 / by[k].n * 100, 0) + '%' : '–'}</td></tr>`).join('')}
     </tbody></table></div></div>
-    <div class="panel"><h2>Meeting history</h2>${hist.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th>Meeting</th><th class="n">Scored</th><th class="n">Points</th></tr></thead><tbody>${hist.map(m => `<tr><td>${esc(m.date)}</td><td>${esc(m.track || 'Untitled')} <span class="tag ai">${m.region}</span></td><td class="n">${m._scored}/${m.races.length}</td><td class="n">${fmt(m._pts)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">No meetings yet.</p>'}</div>
-    <div class="panel"><h2>Model — ${R.name}</h2>
+    ${cmpHtml}
+    <div class="panel"><h2>Meeting history</h2>${hist.length ? `<div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th>Meeting</th><th class="n">Scored</th><th class="n">A pts</th><th class="n colb">B pts</th></tr></thead><tbody>${hist.map(m => `<tr><td>${esc(m.date)}</td><td>${esc(m.track || 'Untitled')} <span class="tag ai">${m.region}</span></td><td class="n">${m._scored}/${m.races.length}</td><td class="n">${fmt(m._pts)}</td><td class="n colb">${m._scoredB ? fmt(m._ptsB) : '–'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">No meetings yet.</p>'}</div>
+    <div class="panel"><h2>Model A settings — ${R.name}</h2>
       <p class="hint">Factor weights for ${R.name} (relative; they're normalised automatically).</p>
       <div class="factors">${R.factors.map(f => `<div><label>${f[1]}</label><input type="number" step="0.01" min="0" data-w="${f[0]}" value="${W[f[0]]}"></div>`).join('')}</div>
       <div style="margin-top:14px"><label for="trust">Trust in your ratings vs the market: <b id="trustVal">${Math.round(S.trust * 100)}%</b></label>
@@ -479,6 +580,7 @@
       const info = { no: p.no, name: p.name, draw: p.draw, weight: p.weight, odds: p.odds, jockey: p.jockey || '', trainer: p.trainer || '' };
       const oddsOnly = ui.pdfMeta && ui.pdfMeta.layout === 'HK' && !p.last6 && !p.draw && p.odds; // betting-page paste: only refresh odds
       if (p.stars != null) info.stars = p.stars;
+      info.oddsEst = p.oddsEst ? true : '';
       const notes = [p.stars ? 'X'.repeat(p.stars) : '', p.last6 ? 'Last 6 ' + p.last6 : p.formFig ? 'Form ' + p.formFig : '',
         p.rtg != null ? `Rtg ${p.rtg}${p.rtgChg != null ? ' (' + (p.rtgChg > 0 ? '+' : '') + p.rtgChg + ')' : ''}` : '', p.claim ? 'Claim ' + p.claim : '', p.overwt ? 'Overwt ' + p.overwt : '',
         p.days ? p.days + ' days' : '', p.best ? 'Best ' + p.best : '', p.hr ? 'HR ' + p.hr : '', p.gear ? 'Gear ' + p.gear : '',
@@ -518,7 +620,7 @@
     return Object.assign({ id: uid(), no: '', name: '', jockey: '', trainer: '', draw: '', weight: '', odds: '', form: '', f, scr: false }, p || {});
   }
   const findRace = el => { const m = meeting(); const id = el.closest('[data-race]')?.dataset.race; return m && m.races.find(r => r.id === id); };
-  function autoPick(race) { const A = analyse(race, meeting().region); if (A.best) race.selId = A.best; return !!A.best; }
+  function autoPick(race) { const reg = meeting().region; const A = analyse(race, reg); if (A.best) race.selId = A.best; const B = analyse(race, reg, 'B'); if (B.best) race.selB = B.best; return !!A.best; }
 
   // ---------- Events ----------
   document.addEventListener('click', async e => {
@@ -571,6 +673,9 @@
       case 'hk-clear': ui.hkText = ''; ui.pdfMeta = null; ui.pdfRaces = []; ui.pdfPick = null; break;
       case 'pdf-import-one': { const tg = $('#hkTarget'); if (tg) ui.hkTarget = tg.value; const r = importParsed(ui.pdfRaces[ui.pdfPick]); ui.open[r.id] = true; toast(`Race ${r.no} imported — check it on the Card tab`); break; }
       case 'pdf-import-all': { const tg = $('#hkTarget'); if (tg) ui.hkTarget = tg.value; ui.pdfRaces.forEach(importParsed); toast(`${ui.pdfRaces.length} races imported`); S.tab = 'card'; break; }
+      case 'copy-slip-b': { const t = slipTextB(m); try { await navigator.clipboard.writeText(t); } catch (err) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } toast('Model B picks copied'); return; }
+      case 'reset-weights-b': S.weightsB[S.region] = weightsBDefault(S.region); S.trustB = 0.6; S.estB = B_EST_DEFAULT; toast('Model B reset'); break;
+      case 'copy-a-to-b': S.weightsB[S.region] = Object.assign({}, S.weights[S.region]); toast('Model A weights copied to B'); break;
       case 'copy-slip': { const t = slipText(m); try { await navigator.clipboard.writeText(t); toast('Slip copied'); } catch (err) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Slip copied'); } return; }
       case 'share-slip': { const t = slipText(m); if (navigator.share) { try { await navigator.share({ title: 'Punter25 selections', text: t }); } catch (err) { /* cancelled */ } } else { toast('Sharing not supported here — use Copy'); } return; }
       case 'print': window.print(); return;
@@ -591,6 +696,9 @@
     if (t.id === 'trust') { S.trust = +t.value; save(); return render(); }
     if (t.id === 'importFile') { const f = t.files[0]; if (!f) return; f.text().then(txt => { try { const d = JSON.parse(txt); if (!Array.isArray(d.meetings)) throw 0; S = Object.assign(defaults(), d); save(); render(); toast('Backup imported'); } catch (err) { toast('That file is not a Punter25 backup'); } }); return; }
     if (t.dataset.w) { S.weights[S.region][t.dataset.w] = Math.max(0, +t.value || 0); save(); return; }
+    if (t.dataset.wb) { S.weightsB[S.region][t.dataset.wb] = Math.max(0, +t.value || 0); save(); return; }
+    if (t.id === 'trustB') { S.trustB = +t.value; save(); return render(); }
+    if (t.id === 'estB') { S.estB = t.value.trim(); save(); return render(); }
     if (!m) return;
     if (t.dataset.m) { m[t.dataset.m] = t.value; save(); return render(); }
     const race = t.closest('[data-race]') && findRace(t); if (!race) return;
@@ -605,8 +713,8 @@
       if (again) { const all = [...document.querySelectorAll(`[data-runner="${r.id}"] input`)]; const i = all.indexOf(again); (all[i + 1] || again).focus(); }
     }
   });
-  document.addEventListener('input', e => { if (e.target.id === 'trust') { const v = $('#trustVal'); if (v) v.textContent = Math.round(e.target.value * 100) + '%'; } });
+  document.addEventListener('input', e => { if (e.target.id === 'trust') { const v = $('#trustVal'); if (v) v.textContent = Math.round(e.target.value * 100) + '%'; } if (e.target.id === 'trustB') { const v = $('#trustBVal'); if (v) v.textContent = Math.round(e.target.value * 100) + '%'; } });
 
-  window.Punter25 = { dec, parseRunnerLine, splitRaces, analyse, scoreRace }; // for testing
+  window.Punter25 = { dec, parseRunnerLine, splitRaces, analyse, scoreRace, scoreB, pickB }; // for testing
   render();
 })();
